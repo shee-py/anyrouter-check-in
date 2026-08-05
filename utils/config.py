@@ -186,11 +186,55 @@ class AccountConfig:
 		return self.name if self.name else f'Account {index + 1}'
 
 
+def _load_agentrouter_accounts_from_env() -> list[AccountConfig] | None:
+	"""从独立的 JSON 环境变量加载多个 AgentRouter 账号。"""
+	accounts_str = (os.getenv('AGENTROUTER_ACCOUNTS') or '').strip()
+	if not accounts_str:
+		return []
+
+	try:
+		accounts_data = json.loads(accounts_str)
+	except json.JSONDecodeError as e:
+		print(f'ERROR: AGENTROUTER_ACCOUNTS JSON 解析失败: {e}')
+		return None
+
+	if not isinstance(accounts_data, list):
+		print('ERROR: AGENTROUTER_ACCOUNTS must use array format [{}]')
+		return None
+
+	accounts = []
+	for i, account_dict in enumerate(accounts_data):
+		if not isinstance(account_dict, dict):
+			print(f'ERROR: AgentRouter account {i + 1} configuration format is incorrect')
+			return None
+
+		normalized = dict(account_dict)
+		normalized.setdefault('provider', 'agentrouter')
+		access_token = normalized.get('access_token')
+		api_user = normalized.get('api_user')
+		if not access_token:
+			print(f'ERROR: AgentRouter account {i + 1} missing required field (access_token)')
+			return None
+		if not api_user:
+			print(f'ERROR: AgentRouter account {i + 1} missing required field (api_user)')
+			return None
+		if 'name' in normalized and not normalized['name']:
+			print(f'ERROR: AgentRouter account {i + 1} name field cannot be empty')
+			return None
+
+		accounts.append(AccountConfig.from_dict(normalized, i))
+
+	return accounts
+
+
 def load_accounts_config() -> list[AccountConfig] | None:
 	"""从环境变量加载账号配置"""
 	accounts_str = os.getenv('ANYROUTER_ACCOUNTS')
 	agentrouter_token = (os.getenv('AGENTROUTER_ACCESS_TOKEN') or '').strip()
 	agentrouter_api_user = (os.getenv('AGENTROUTER_API_USER') or '').strip()
+	agentrouter_accounts = _load_agentrouter_accounts_from_env()
+	if agentrouter_accounts is None:
+		return None
 
 	agentrouter_account = None
 	if agentrouter_token:
@@ -207,8 +251,11 @@ def load_accounts_config() -> list[AccountConfig] | None:
 		)
 
 	if not accounts_str:
+		standalone_accounts = list(agentrouter_accounts)
 		if agentrouter_account:
-			return [agentrouter_account]
+			standalone_accounts.insert(0, agentrouter_account)
+		if standalone_accounts:
+			return standalone_accounts
 		print('ERROR: ANYROUTER_ACCOUNTS environment variable not found')
 		return None
 
@@ -258,6 +305,7 @@ def load_accounts_config() -> list[AccountConfig] | None:
 
 		if agentrouter_account:
 			accounts.append(agentrouter_account)
+		accounts.extend(agentrouter_accounts)
 
 		return accounts
 	except Exception as e:

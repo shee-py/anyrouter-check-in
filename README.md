@@ -56,7 +56,8 @@
 4. 点击新建的 `production` 环境进入环境配置页
 5. 点击 "Add environment secret" 创建 secret：
    - `ANYROUTER_ACCOUNTS`: 你的多账号配置数据（JSON 格式）
-   - （可选）`AGENTROUTER_ACCESS_TOKEN` 与 `AGENTROUTER_API_USER`: 独立配置 AgentRouter 的访问令牌与 API User。若设置这两个 Secret，系统会自动追加一个 AgentRouter 账号，可保留已有 `ANYROUTER_ACCOUNTS` 配置不用改动；若未设置 `ANYROUTER_ACCOUNTS`，也允许仅配置这两个 Secret 来运行 AgentRouter 账号。
+   - （可选）`AGENTROUTER_ACCESS_TOKEN` 与 `AGENTROUTER_API_USER`: 独立配置一个 AgentRouter 账号。若设置这两个 Secret，系统会自动追加一个 AgentRouter 账号，可保留已有 `ANYROUTER_ACCOUNTS` 配置不用改动；若未设置 `ANYROUTER_ACCOUNTS`，也允许仅配置这两个 Secret 来运行 AgentRouter 账号。
+   - （可选）`AGENTROUTER_ACCOUNTS`: 多个 AgentRouter 账号的 JSON 数组。数组中的账号会追加到现有账号，不会覆盖其他配置。
 
 ### 4. 多账号配置格式
 
@@ -74,6 +75,18 @@
     "provider": "agentrouter",
     "access_token": "sk-your-access-token",
     "api_user": "12345"
+  }
+]
+```
+
+多个 AgentRouter 账号也可以单独使用 `AGENTROUTER_ACCOUNTS` Secret：
+
+```json
+[
+  {
+    "name": "AgentRouter 账号 2",
+    "access_token": "sk-your-access-token",
+    "api_user": "342843"
   }
 ]
 ```

@@ -318,3 +318,86 @@ def test_load_accounts_config_only_agentrouter_env_vars(monkeypatch, capsys):
 	captured = capsys.readouterr()
 	assert secret_token not in captured.out
 	assert secret_token not in captured.err
+
+
+def test_load_accounts_config_appends_multiple_agentrouter_accounts(monkeypatch, capsys):
+	"""测试 AGENTROUTER_ACCOUNTS 数组会追加多个 AgentRouter 账号且不泄露令牌"""
+	monkeypatch.setenv(
+		'ANYROUTER_ACCOUNTS',
+		json.dumps([{'name': 'Existing Account', 'email': 'existing@example.com', 'password': 'pass'}]),
+	)
+	first_token = 'sk-agentrouter-array-token-1'
+	second_token = 'sk-agentrouter-array-token-2'
+	monkeypatch.setenv(
+		'AGENTROUTER_ACCOUNTS',
+		json.dumps(
+			[
+				{'name': 'AgentRouter 1', 'access_token': first_token, 'api_user': '342843'},
+				{'name': 'AgentRouter 2', 'provider': 'agentrouter', 'access_token': second_token, 'api_user': '342844'},
+			]
+		),
+	)
+	monkeypatch.delenv('AGENTROUTER_ACCESS_TOKEN', raising=False)
+	monkeypatch.delenv('AGENTROUTER_API_USER', raising=False)
+
+	accounts = load_accounts_config()
+	assert accounts is not None
+	assert [account.name for account in accounts] == ['Existing Account', 'AgentRouter 1', 'AgentRouter 2']
+	assert [account.api_user for account in accounts[1:]] == ['342843', '342844']
+	assert [account.provider for account in accounts[1:]] == ['agentrouter', 'agentrouter']
+
+	captured = capsys.readouterr()
+	assert first_token not in captured.out
+	assert second_token not in captured.out
+	assert first_token not in captured.err
+	assert second_token not in captured.err
+
+
+def test_load_accounts_config_only_agentrouter_accounts_array(monkeypatch, capsys):
+	"""测试没有 ANYROUTER_ACCOUNTS 时可仅使用 AgentRouter 账号数组"""
+	monkeypatch.delenv('ANYROUTER_ACCOUNTS', raising=False)
+	monkeypatch.delenv('AGENTROUTER_ACCESS_TOKEN', raising=False)
+	monkeypatch.delenv('AGENTROUTER_API_USER', raising=False)
+	secret_token = 'sk-only-agentrouter-array-token'
+	monkeypatch.setenv(
+		'AGENTROUTER_ACCOUNTS',
+		json.dumps([{'name': 'AgentRouter Array', 'access_token': secret_token, 'api_user': '342843'}]),
+	)
+
+	accounts = load_accounts_config()
+	assert accounts is not None
+	assert len(accounts) == 1
+	assert accounts[0].name == 'AgentRouter Array'
+	assert accounts[0].provider == 'agentrouter'
+	assert accounts[0].api_user == '342843'
+
+	captured = capsys.readouterr()
+	assert secret_token not in captured.out
+	assert secret_token not in captured.err
+
+
+def test_load_accounts_config_agentrouter_accounts_invalid_json(monkeypatch, capsys):
+	"""测试 AgentRouter 多账号 JSON 格式错误时安全失败"""
+	monkeypatch.setenv('AGENTROUTER_ACCOUNTS', '{invalid-json')
+	accounts = load_accounts_config()
+	assert accounts is None
+
+	captured = capsys.readouterr()
+	assert 'AGENTROUTER_ACCOUNTS JSON 解析失败' in captured.out
+	assert 'invalid-json' not in captured.out
+
+
+def test_load_accounts_config_agentrouter_accounts_missing_api_user(monkeypatch, capsys):
+	"""测试 AgentRouter 多账号缺 api_user 时安全失败且不泄露令牌"""
+	secret_token = 'sk-agentrouter-array-missing-user'
+	monkeypatch.setenv(
+		'AGENTROUTER_ACCOUNTS',
+		json.dumps([{'access_token': secret_token}]),
+	)
+	accounts = load_accounts_config()
+	assert accounts is None
+
+	captured = capsys.readouterr()
+	assert 'missing required field (api_user)' in captured.out
+	assert secret_token not in captured.out
+	assert secret_token not in captured.err
