@@ -126,6 +126,7 @@ def test_run_check_in_requests_injects_authorization_header(monkeypatch, capsys)
 	assert success is True
 	assert sent_headers.get('Authorization') == 'Bearer my-secret-token-xyz'
 	assert sent_headers.get('new-api-user') == '12345'
+	assert sent_headers.get('Accept-Encoding') == 'gzip, deflate'
 	assert before['quota'] == 2.0  # 1,000,000 / 500,000
 	assert before['used_quota'] == 1.0  # 500,000 / 500,000
 
@@ -317,4 +318,3 @@ def test_load_accounts_config_only_agentrouter_env_vars(monkeypatch, capsys):
 	captured = capsys.readouterr()
 	assert secret_token not in captured.out
 	assert secret_token not in captured.err
-
