@@ -389,10 +389,16 @@ async def check_in_account(account: AccountConfig, account_index: int, app_confi
 		if not account.api_user:
 			print(f'[FAILED] {account_name}: Missing required field (api_user) for access_token authentication')
 			return False, None, None
-		print(f'[INFO] {account_name}: Using access_token authentication (no browser required)...')
 		auth_method = 'access token'
 		access_token = account.access_token
-		all_cookies = {}
+		if provider_config.needs_waf_cookies():
+			print(f'[INFO] {account_name}: Using access_token authentication with WAF cookies...')
+			all_cookies = await prepare_cookies(account_name, provider_config, {})
+			if all_cookies is None:
+				return False, None, None
+		else:
+			print(f'[INFO] {account_name}: Using access_token authentication...')
+			all_cookies = {}
 	else:
 		user_cookies = parse_cookies(account.cookies)
 		if not user_cookies:

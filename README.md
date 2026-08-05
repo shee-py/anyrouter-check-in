@@ -81,7 +81,7 @@
 **字段说明**：
 
 - `email` + `password`：推荐的浏览器登录方式，登录成功后会自动获取 cookies 与用户标识
-- `access_token`：系统访问令牌登录方式（支持 AgentRouter 等平台），不需要启动浏览器；必须搭配 `api_user`
+- `access_token`：系统访问令牌登录方式（支持 AgentRouter 等平台），GitHub Actions 会自动获取所需 WAF cookie，不需要手工复制 Cookie；必须搭配 `api_user`
 - `cookies`：兼容旧版的 session cookies 登录方式
 - `api_user`：访问令牌或 session cookies 登录时用于请求头的 new-api-user 参数；邮箱密码登录可省略
 - `provider` (可选)：指定使用的服务商，默认为 `anyrouter`

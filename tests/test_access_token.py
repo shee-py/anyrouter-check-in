@@ -135,8 +135,8 @@ def test_run_check_in_requests_injects_authorization_header(monkeypatch, capsys)
 
 
 @pytest.mark.asyncio
-async def test_agentrouter_token_account_does_not_launch_browser(capsys):
-	"""测试 AgentRouter access_token 账号分支不启动浏览器并完成自动签到"""
+async def test_agentrouter_token_account_uses_waf_cookies(capsys):
+	"""测试 AgentRouter access_token 账号分支使用 prepare_cookies 获取 WAF cookie 且不调用 login_with_credentials"""
 	account = AccountConfig(
 		name='AgentRouter Token',
 		provider='agentrouter',
@@ -145,27 +145,32 @@ async def test_agentrouter_token_account_does_not_launch_browser(capsys):
 	)
 	app_config = AppConfig.load_from_env()
 
-	with (
-		patch('checkin.launch_async') as mock_launch,
-		patch('checkin.login_with_credentials') as mock_login,
-		patch('checkin.get_waf_cookies_with_browser') as mock_waf,
-		patch('httpx.Client.get') as mock_get,
-	):
+	def mock_get(url, headers=None, timeout=None):
 		mock_resp = MagicMock()
 		mock_resp.status_code = 200
 		mock_resp.json.return_value = {
 			'success': True,
 			'data': {'quota': 5000000, 'used_quota': 1000000},
 		}
-		mock_get.return_value = mock_resp
+		return mock_resp
 
+	with (
+		patch('checkin.login_with_credentials') as mock_login,
+		patch('checkin.get_waf_cookies_with_browser', return_value={'acw_tc': 'test-waf-cookie-val'}) as mock_waf,
+		patch('httpx.Client.get', side_effect=mock_get),
+		patch('checkin.run_check_in_requests', wraps=run_check_in_requests) as spy_run_requests,
+	):
 		success, before, after = await check_in_account(account, 0, app_config)
 
 		assert success is True
-		# 验证未调用任何浏览器相关函数
-		mock_launch.assert_not_called()
 		mock_login.assert_not_called()
-		mock_waf.assert_not_called()
+		mock_waf.assert_called_once()
+
+		# 验证传递给 run_check_in_requests 的 cookies 包含 WAF cookie
+		call_args = spy_run_requests.call_args
+		assert call_args is not None
+		all_cookies = call_args[0][0]
+		assert all_cookies == {'acw_tc': 'test-waf-cookie-val'}
 
 		# 验证正确换算 quota (5000000 / 500000 = 10.0, 1000000 / 500000 = 2.0)
 		assert after['quota'] == 10.0
@@ -173,6 +178,79 @@ async def test_agentrouter_token_account_does_not_launch_browser(capsys):
 
 	captured = capsys.readouterr()
 	assert 'secret-token-abc' not in captured.out
+	assert 'secret-token-abc' not in captured.err
+
+
+@pytest.mark.asyncio
+async def test_agentrouter_token_account_waf_failure_returns_false(capsys):
+	"""测试 access_token 账号获取 WAF cookie 失败时安全失败"""
+	account = AccountConfig(
+		name='AgentRouter Token',
+		provider='agentrouter',
+		access_token='secret-token-fail',
+		api_user='99999',
+	)
+	app_config = AppConfig.load_from_env()
+
+	with (
+		patch('checkin.login_with_credentials') as mock_login,
+		patch('checkin.get_waf_cookies_with_browser', return_value=None) as mock_waf,
+	):
+		success, before, after = await check_in_account(account, 0, app_config)
+
+		assert success is False
+		assert before is None
+		assert after is None
+		mock_login.assert_not_called()
+		mock_waf.assert_called_once()
+
+	captured = capsys.readouterr()
+	assert 'secret-token-fail' not in captured.out
+	assert 'secret-token-fail' not in captured.err
+
+
+@pytest.mark.asyncio
+async def test_token_account_without_waf_needs_does_not_fetch_waf(capsys):
+	"""测试 provider 不需要 WAF 时 access_token 分支不调用 WAF 获取流程且不调用 login_with_credentials"""
+	account = AccountConfig(
+		name='AnyRouter Token',
+		provider='anyrouter',
+		access_token='secret-token-no-waf',
+		api_user='88888',
+	)
+	app_config = AppConfig.load_from_env()
+	provider_config = app_config.get_provider('anyrouter')
+	assert provider_config is not None
+	provider_config.bypass_method = None
+
+	with (
+		patch('checkin.login_with_credentials') as mock_login,
+		patch('checkin.get_waf_cookies_with_browser') as mock_waf,
+		patch('httpx.Client.get') as mock_get,
+		patch('httpx.Client.post') as mock_post,
+	):
+		mock_get_resp = MagicMock()
+		mock_get_resp.status_code = 200
+		mock_get_resp.json.return_value = {
+			'success': True,
+			'data': {'quota': 500000, 'used_quota': 0},
+		}
+		mock_get.return_value = mock_get_resp
+
+		mock_post_resp = MagicMock()
+		mock_post_resp.status_code = 200
+		mock_post_resp.json.return_value = {'success': True, 'ret': 1}
+		mock_post.return_value = mock_post_resp
+
+		success, before, after = await check_in_account(account, 0, app_config)
+
+		assert success is True
+		mock_login.assert_not_called()
+		mock_waf.assert_not_called()
+
+	captured = capsys.readouterr()
+	assert 'secret-token-no-waf' not in captured.out
+	assert 'secret-token-no-waf' not in captured.err
 
 
 def test_load_accounts_config_appends_agentrouter_env_vars(monkeypatch, capsys):
