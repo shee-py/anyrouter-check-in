@@ -149,12 +149,13 @@ class AppConfig:
 class AccountConfig:
 	"""账号配置"""
 
-	cookies: dict | str | None
+	cookies: dict | str | None = None
 	api_user: str | None = None
 	provider: str = 'anyrouter'
 	name: str | None = None
 	email: str | None = None
 	password: str | None = None
+	access_token: str | None = None
 
 	@classmethod
 	def from_dict(cls, data: dict, index: int) -> 'AccountConfig':
@@ -169,11 +170,16 @@ class AccountConfig:
 			name=name if name else None,
 			email=data.get('email'),
 			password=data.get('password'),
+			access_token=data.get('access_token'),
 		)
 
 	def has_login_credentials(self) -> bool:
 		"""是否配置了邮箱密码登录"""
 		return bool(self.email and self.password)
+
+	def has_access_token(self) -> bool:
+		"""是否配置了系统访问令牌 (access_token)"""
+		return bool(self.access_token)
 
 	def get_display_name(self, index: int) -> str:
 		"""获取显示名称"""
@@ -183,7 +189,26 @@ class AccountConfig:
 def load_accounts_config() -> list[AccountConfig] | None:
 	"""从环境变量加载账号配置"""
 	accounts_str = os.getenv('ANYROUTER_ACCOUNTS')
+	agentrouter_token = (os.getenv('AGENTROUTER_ACCESS_TOKEN') or '').strip()
+	agentrouter_api_user = (os.getenv('AGENTROUTER_API_USER') or '').strip()
+
+	agentrouter_account = None
+	if agentrouter_token:
+		if not agentrouter_api_user:
+			print(
+				'ERROR: AGENTROUTER_ACCESS_TOKEN environment variable set, but missing required field (AGENTROUTER_API_USER)'
+			)
+			return None
+		agentrouter_account = AccountConfig(
+			provider='agentrouter',
+			name='AgentRouter',
+			access_token=agentrouter_token,
+			api_user=agentrouter_api_user,
+		)
+
 	if not accounts_str:
+		if agentrouter_account:
+			return [agentrouter_account]
 		print('ERROR: ANYROUTER_ACCOUNTS environment variable not found')
 		return None
 
@@ -205,19 +230,24 @@ def load_accounts_config() -> list[AccountConfig] | None:
 				print(f'ERROR: Account {i + 1} configuration format is incorrect')
 				return None
 
-			if 'api_user' not in account_dict:
-				has_login = account_dict.get('email') and account_dict.get('password')
-				if not has_login:
+			has_cookies = bool('cookies' in account_dict and account_dict['cookies'])
+			has_login = bool(account_dict.get('email') and account_dict.get('password'))
+			has_access_token = bool('access_token' in account_dict and account_dict['access_token'])
+
+			if not has_cookies and not has_login and not has_access_token:
+				print(f'ERROR: Account {i + 1} must have either cookies, email+password, or access_token')
+				return None
+
+			api_user = account_dict.get('api_user')
+			if not api_user and not has_login:
+				if has_access_token:
+					print(
+						f'ERROR: Account {i + 1} has access_token configured but is missing required field (api_user)'
+					)
+				else:
 					print(
 						f'ERROR: Account {i + 1} missing required field (api_user) - only email+password login can omit it'
 					)
-					return None
-
-			has_cookies = 'cookies' in account_dict and account_dict['cookies']
-			has_login = account_dict.get('email') and account_dict.get('password')
-
-			if not has_cookies and not has_login:
-				print(f'ERROR: Account {i + 1} must have either cookies or email+password')
 				return None
 
 			if 'name' in account_dict and not account_dict['name']:
@@ -225,6 +255,9 @@ def load_accounts_config() -> list[AccountConfig] | None:
 				return None
 
 			accounts.append(AccountConfig.from_dict(account_dict, i))
+
+		if agentrouter_account:
+			accounts.append(agentrouter_account)
 
 		return accounts
 	except Exception as e:

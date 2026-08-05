@@ -55,8 +55,8 @@
 3. 新建一个名为 `production` 的环境
 4. 点击新建的 `production` 环境进入环境配置页
 5. 点击 "Add environment secret" 创建 secret：
-   - Name: `ANYROUTER_ACCOUNTS`
-   - Value: 你的多账号配置数据
+   - `ANYROUTER_ACCOUNTS`: 你的多账号配置数据（JSON 格式）
+   - （可选）`AGENTROUTER_ACCESS_TOKEN` 与 `AGENTROUTER_API_USER`: 独立配置 AgentRouter 的访问令牌与 API User。若设置这两个 Secret，系统会自动追加一个 AgentRouter 账号，可保留已有 `ANYROUTER_ACCOUNTS` 配置不用改动；若未设置 `ANYROUTER_ACCOUNTS`，也允许仅配置这两个 Secret 来运行 AgentRouter 账号。
 
 ### 4. 多账号配置格式
 
@@ -70,10 +70,10 @@
     "password": "account1_password"
   },
   {
-    "name": "备用账号",
+    "name": "AgentRouter 令牌账号",
     "provider": "agentrouter",
-    "email": "account2@example.com",
-    "password": "account2_password"
+    "access_token": "sk-your-access-token",
+    "api_user": "12345"
   }
 ]
 ```
@@ -81,8 +81,9 @@
 **字段说明**：
 
 - `email` + `password`：推荐的浏览器登录方式，登录成功后会自动获取 cookies 与用户标识
+- `access_token`：系统访问令牌登录方式（支持 AgentRouter 等平台），不需要启动浏览器；必须搭配 `api_user`
 - `cookies`：兼容旧版的 session cookies 登录方式
-- `api_user`：session cookies 登录时用于请求头的 new-api-user 参数；邮箱密码登录可省略
+- `api_user`：访问令牌或 session cookies 登录时用于请求头的 new-api-user 参数；邮箱密码登录可省略
 - `provider` (可选)：指定使用的服务商，默认为 `anyrouter`
 - `name` (可选)：自定义账号显示名称，用于通知和日志中标识账号
 
@@ -91,6 +92,7 @@
 - 如果未提供 `provider` 字段，默认使用 `anyrouter`（向后兼容）
 - 如果未提供 `name` 字段，会使用 `Account 1`、`Account 2` 等默认名称
 - `anyrouter` 与 `agentrouter` 配置已内置，无需填写
+- AgentRouter 平台由后端根据访问令牌或 Cookie 调用 `/api/user/self` 时自动触发登录签到，并按 `quota_per_unit=500000` 进行余额/消耗换算（$1.00 = 500,000 quota）
 
 如果使用 session cookies 登录，接下来获取 cookies 与 api_user 的值。
 

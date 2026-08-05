@@ -362,10 +362,12 @@ async def check_in_account(account: AccountConfig, account_index: int, app_confi
 
 	print(f'[INFO] {account_name}: Using provider "{account.provider}" ({provider_config.domain})')
 
-	# 邮箱密码优先
+	# 优先级：email/password > access_token > cookies
 	all_cookies = None
 	resolved_api_user: str | None = None
 	auth_method = None
+	access_token = None
+
 	if account.has_login_credentials():
 		print(f'[INFO] {account_name}: Attempting email/password login (priority)...')
 		assert account.email is not None and account.password is not None
@@ -383,6 +385,14 @@ async def check_in_account(account: AccountConfig, account_index: int, app_confi
 		else:
 			print(f'[FAILED] {account_name}: Email/password login failed, will not use stale session cookies')
 			return False, None, None
+	elif account.has_access_token():
+		if not account.api_user:
+			print(f'[FAILED] {account_name}: Missing required field (api_user) for access_token authentication')
+			return False, None, None
+		print(f'[INFO] {account_name}: Using access_token authentication (no browser required)...')
+		auth_method = 'access token'
+		access_token = account.access_token
+		all_cookies = {}
 	else:
 		user_cookies = parse_cookies(account.cookies)
 		if not user_cookies:
@@ -391,7 +401,7 @@ async def check_in_account(account: AccountConfig, account_index: int, app_confi
 		all_cookies = await prepare_cookies(account_name, provider_config, user_cookies)
 		auth_method = 'session cookies'
 
-	if not all_cookies:
+	if all_cookies is None:
 		return False, None, None
 
 	print(f'[AUTH] {account_name}: Using auth method -> {auth_method}')
@@ -401,6 +411,7 @@ async def check_in_account(account: AccountConfig, account_index: int, app_confi
 		account,
 		account_name,
 		provider_config,
+		access_token=access_token,
 		api_user_override=resolved_api_user,
 		use_proxy=provider_config.use_proxy,
 	)
@@ -412,6 +423,7 @@ def run_check_in_requests(
 	account_name: str,
 	provider_config,
 	*,
+	access_token: str | None = None,
 	api_user_override: str | None = None,
 	use_proxy: bool = False,
 ) -> tuple[bool, dict | None, dict | None]:
@@ -429,7 +441,8 @@ def run_check_in_requests(
 			print(f'[WARN] {account_name}: Provider requires proxy but CHECKIN_PROXY_URL is not set')
 
 		with httpx.Client(**client_kwargs) as client:
-			client.cookies.update(all_cookies)
+			if all_cookies:
+				client.cookies.update(all_cookies)
 
 			headers = {
 				'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
@@ -443,6 +456,9 @@ def run_check_in_requests(
 				'Sec-Fetch-Mode': 'cors',
 				'Sec-Fetch-Site': 'same-origin',
 			}
+
+			if access_token:
+				headers['Authorization'] = f'Bearer {access_token}'
 
 			api_user = api_user_override or account.api_user
 			if api_user:
