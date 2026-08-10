@@ -10,6 +10,7 @@ def test_builtin_provider_profile_persistence_defaults(monkeypatch):
 
 	assert config.providers['anyrouter'].persist_profile is True
 	assert config.providers['agentrouter'].persist_profile is False
+	assert config.providers['agentrouter'].sign_in_path is None
 
 
 def test_provider_profile_persistence_can_override_builtin(monkeypatch):

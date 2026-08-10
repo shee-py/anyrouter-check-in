@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from checkin import check_in_account, run_check_in_requests
+from checkin import check_in_account, get_user_info, run_check_in_requests
 from utils.config import AccountConfig, AppConfig, load_accounts_config
 
 
@@ -127,12 +127,35 @@ def test_run_check_in_requests_injects_authorization_header(monkeypatch, capsys)
 	assert sent_headers.get('Authorization') == 'Bearer my-secret-token-xyz'
 	assert sent_headers.get('new-api-user') == '12345'
 	assert sent_headers.get('Accept-Encoding') == 'gzip, deflate'
-	assert before['quota'] == 2.0  # 1,000,000 / 500,000
-	assert before['used_quota'] == 1.0  # 500,000 / 500,000
+	assert before is None
+	assert after['quota'] == 2.0  # 1,000,000 / 500,000
+	assert after['used_quota'] == 1.0  # 500,000 / 500,000
 
 	captured = capsys.readouterr()
 	assert 'my-secret-token-xyz' not in captured.out
 	assert 'my-secret-token-xyz' not in captured.err
+
+
+def test_get_user_info_retries_invalid_json(monkeypatch, capsys):
+	client = MagicMock()
+	invalid_response = MagicMock()
+	invalid_response.status_code = 200
+	invalid_response.json.side_effect = ValueError('temporary WAF response')
+	valid_response = MagicMock()
+	valid_response.status_code = 200
+	valid_response.json.return_value = {
+		'success': True,
+		'data': {'quota': 12500000, 'used_quota': 0},
+	}
+	client.get.side_effect = [invalid_response, valid_response]
+	monkeypatch.setattr('checkin.time.sleep', lambda _seconds: None)
+
+	result = get_user_info(client, {}, 'https://agentrouter.org/api/user/self')
+
+	assert result['success'] is True
+	assert result['quota'] == 25.0
+	assert client.get.call_count == 2
+	assert 'retrying' in capsys.readouterr().out
 
 
 @pytest.mark.asyncio
