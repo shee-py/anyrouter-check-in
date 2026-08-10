@@ -96,7 +96,8 @@ class AppConfig:
 			),
 			'agentrouter': ProviderConfig(
 				name='agentrouter',
-				domain='https://agentrouter.org',
+				# 官方公告确认该备用域名与主站 API 完全一致，且对 GitHub Runner 的 WAF 更稳定。
+				domain='https://ps.air-outer.com',
 				login_path='/login',
 				sign_in_path=None,  # 首次鉴权查询用户信息时由 AgentRouter 自动签到
 				user_info_path='/api/user/self',
