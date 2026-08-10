@@ -101,6 +101,7 @@ def test_run_check_in_requests_injects_authorization_header(monkeypatch, capsys)
 	provider_config = app_config.get_provider('agentrouter')
 
 	sent_headers = {}
+	posted_url = None
 
 	def mock_get(url, headers=None, timeout=None):
 		nonlocal sent_headers
@@ -113,7 +114,22 @@ def test_run_check_in_requests_injects_authorization_header(monkeypatch, capsys)
 		}
 		return mock_resp
 
-	with patch('httpx.Client.get', side_effect=mock_get):
+	def mock_post(url, headers=None, timeout=None):
+		nonlocal posted_url
+		posted_url = url
+		mock_resp = MagicMock()
+		mock_resp.status_code = 200
+		mock_resp.json.return_value = {
+			'success': True,
+			'message': '签到成功',
+			'data': {'quota_awarded': 12500000},
+		}
+		return mock_resp
+
+	with (
+		patch('httpx.Client.get', side_effect=mock_get),
+		patch('httpx.Client.post', side_effect=mock_post),
+	):
 		success, before, after = run_check_in_requests(
 			all_cookies={},
 			account=account,
@@ -127,6 +143,7 @@ def test_run_check_in_requests_injects_authorization_header(monkeypatch, capsys)
 	assert sent_headers.get('Authorization') == 'Bearer my-secret-token-xyz'
 	assert sent_headers.get('new-api-user') == '12345'
 	assert sent_headers.get('Accept-Encoding') == 'gzip, deflate'
+	assert posted_url == 'https://agentrouter.org/api/user/checkin'
 	assert before['quota'] == 2.0  # 1,000,000 / 500,000
 	assert before['used_quota'] == 1.0  # 500,000 / 500,000
 
@@ -155,10 +172,21 @@ async def test_agentrouter_token_account_uses_waf_cookies(capsys):
 		}
 		return mock_resp
 
+	def mock_post(url, headers=None, timeout=None):
+		mock_resp = MagicMock()
+		mock_resp.status_code = 200
+		mock_resp.json.return_value = {
+			'success': True,
+			'message': '签到成功',
+			'data': {'quota_awarded': 12500000},
+		}
+		return mock_resp
+
 	with (
 		patch('checkin.login_with_credentials') as mock_login,
 		patch('checkin.get_waf_cookies_with_browser', return_value={'acw_tc': 'test-waf-cookie-val'}) as mock_waf,
 		patch('httpx.Client.get', side_effect=mock_get),
+		patch('httpx.Client.post', side_effect=mock_post),
 		patch('checkin.run_check_in_requests', wraps=run_check_in_requests) as spy_run_requests,
 	):
 		success, before, after = await check_in_account(account, 0, app_config)

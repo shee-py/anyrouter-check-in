@@ -485,13 +485,8 @@ def run_check_in_requests(
 				user_info_after = get_user_info(client, headers, user_info_url)
 				return success, user_info_before, user_info_after
 
-			user_info_after = get_user_info(client, headers, user_info_url)
-			if user_info_after and user_info_after.get('success'):
-				print(f'[INFO] {account_name}: Check-in completed automatically (triggered by user info request)')
-				return True, user_info_before, user_info_after
-			error = user_info_after.get('error', 'Unknown error') if user_info_after else 'Unknown error'
-			print(f'[FAILED] {account_name}: Auto check-in failed - {error}')
-			return False, user_info_before, user_info_after
+			print(f'[FAILED] {account_name}: No check-in endpoint configured')
+			return False, user_info_before, None
 
 	except Exception as e:
 		print(f'[FAILED] {account_name}: Error occurred during check-in process - {str(e)[:50]}...')
