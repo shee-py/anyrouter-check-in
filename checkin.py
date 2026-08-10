@@ -41,6 +41,7 @@ from utils.proxy import get_playwright_proxy, get_proxy_server
 load_dotenv()
 
 BALANCE_HASH_FILE = 'balance_hash.txt'
+BALANCE_STATE_FILE = 'balance_state.json'
 
 
 def load_balance_hash():
@@ -61,6 +62,27 @@ def save_balance_hash(balance_hash):
 			f.write(balance_hash)
 	except Exception as e:
 		print(f'Warning: Failed to save balance hash: {e}')
+
+
+def load_balance_state() -> dict:
+	"""加载上一次运行的余额明细，用于跨运行验证自动签到奖励。"""
+	try:
+		if os.path.exists(BALANCE_STATE_FILE):
+			with open(BALANCE_STATE_FILE, encoding='utf-8') as f:
+				state = json.load(f)
+				return state if isinstance(state, dict) else {}
+	except Exception:  # nosec B110
+		pass
+	return {}
+
+
+def save_balance_state(balances: dict) -> None:
+	"""保存余额明细；内容只含额度与消耗，不含任何凭据。"""
+	try:
+		with open(BALANCE_STATE_FILE, 'w', encoding='utf-8') as f:
+			json.dump(balances, f, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+	except Exception as e:
+		print(f'Warning: Failed to save balance state: {e}')
 
 
 def generate_balance_hash(balances):
@@ -485,8 +507,12 @@ def run_check_in_requests(
 				user_info_after = get_user_info(client, headers, user_info_url)
 				return success, user_info_before, user_info_after
 
-			print(f'[FAILED] {account_name}: No check-in endpoint configured')
-			return False, user_info_before, None
+			if user_info_before and user_info_before.get('success'):
+				print(f'[SUCCESS] {account_name}: Automatic check-in trigger completed')
+				return True, None, user_info_before
+			error = user_info_before.get('error', 'Unknown error') if user_info_before else 'Unknown error'
+			print(f'[FAILED] {account_name}: Automatic check-in trigger failed - {error}')
+			return False, None, user_info_before
 
 	except Exception as e:
 		print(f'[FAILED] {account_name}: Error occurred during check-in process - {str(e)[:50]}...')
@@ -524,6 +550,7 @@ async def main():
 	print(f'[INFO] Found {len(accounts)} account configurations')
 
 	last_balance_hash = load_balance_hash()
+	last_balances = load_balance_state()
 
 	success_count = 0
 	total_count = len(accounts)
@@ -577,6 +604,33 @@ async def main():
 						'balance_change': balance_change,
 						'success': success,
 					}
+				elif account_key in last_balances:
+					previous = last_balances[account_key]
+					before_quota = float(previous.get('quota', 0))
+					before_used = float(previous.get('used', 0))
+					after_quota = current_quota
+					after_used = current_used
+					check_in_reward = (after_quota + after_used) - (before_quota + before_used)
+					usage_increase = after_used - before_used
+					balance_change = after_quota - before_quota
+
+					account_check_in_details[account_key] = {
+						'name': account.get_display_name(i),
+						'before_quota': before_quota,
+						'before_used': before_used,
+						'after_quota': after_quota,
+						'after_used': after_used,
+						'check_in_reward': check_in_reward,
+						'usage_increase': usage_increase,
+						'balance_change': balance_change,
+						'success': success,
+					}
+
+					account_name = account.get_display_name(i)
+					if check_in_reward > 0:
+						print(f'[SUCCESS] {account_name}: Check-in reward verified: +${check_in_reward:.2f}')
+					else:
+						print(f'[INFO] {account_name}: No new reward detected; likely already checked in today')
 
 			if should_notify_this_account:
 				account_name = account.get_display_name(i)
@@ -619,6 +673,7 @@ async def main():
 
 	if current_balance_hash:
 		save_balance_hash(current_balance_hash)
+		save_balance_state(current_balances)
 
 	if need_notify and notification_content:
 		summary = [
