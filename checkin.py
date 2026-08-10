@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import sys
+import time
 from datetime import datetime
 
 if hasattr(sys.stdout, 'reconfigure'):
@@ -256,26 +257,34 @@ async def login_with_credentials(
 		return None
 
 
-def get_user_info(client, headers, user_info_url: str):
+def get_user_info(client, headers, user_info_url: str, *, attempts: int = 3):
 	"""获取用户信息"""
-	try:
-		response = client.get(user_info_url, headers=headers, timeout=30)
+	last_error = 'Unknown error'
+	for attempt in range(1, attempts + 1):
+		try:
+			response = client.get(user_info_url, headers=headers, timeout=30)
 
-		if response.status_code == 200:
-			data = response.json()
-			if data.get('success'):
-				user_data = data.get('data', {})
-				quota = round(user_data.get('quota', 0) / 500000, 2)
-				used_quota = round(user_data.get('used_quota', 0) / 500000, 2)
-				return {
-					'success': True,
-					'quota': quota,
-					'used_quota': used_quota,
-					'display': f':money: Current balance: ${quota}, Used: ${used_quota}',
-				}
-		return {'success': False, 'error': f'Failed to get user info: HTTP {response.status_code}'}
-	except Exception as e:
-		return {'success': False, 'error': f'Failed to get user info: {str(e)[:50]}...'}
+			if response.status_code == 200:
+				data = response.json()
+				if data.get('success'):
+					user_data = data.get('data', {})
+					quota = round(user_data.get('quota', 0) / 500000, 2)
+					used_quota = round(user_data.get('used_quota', 0) / 500000, 2)
+					return {
+						'success': True,
+						'quota': quota,
+						'used_quota': used_quota,
+						'display': f':money: Current balance: ${quota}, Used: ${used_quota}',
+					}
+			last_error = f'HTTP {response.status_code}'
+		except Exception as e:
+			last_error = f'{str(e)[:50]}...'
+
+		if attempt < attempts:
+			print(f'[WARN] User info request failed ({attempt}/{attempts}), retrying...')
+			time.sleep(attempt)
+
+	return {'success': False, 'error': f'Failed to get user info: {last_error}'}
 
 
 async def prepare_cookies(account_name: str, provider_config, user_cookies: dict) -> dict | None:
