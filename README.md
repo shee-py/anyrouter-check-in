@@ -86,12 +86,14 @@ AgentRouter 自动签到请单独使用 `AGENTROUTER_LOGIN_ACCOUNTS` Secret：
   {
     "name": "AgentRouter 账号 1",
     "username": "your-login-name",
-    "password": "your-login-password"
+    "password": "your-login-password",
+    "api_user": "342842"
   },
   {
     "name": "AgentRouter 账号 2",
     "email": "your-login-email@example.com",
-    "password": "your-login-password"
+    "password": "your-login-password",
+    "api_user": "342843"
   }
 ]
 ```
@@ -99,6 +101,7 @@ AgentRouter 自动签到请单独使用 `AGENTROUTER_LOGIN_ACCOUNTS` Secret：
 **字段说明**：
 
 - `username`/`email` + `password`：真实登录方式；AgentRouter 每日奖励必须使用此方式
+- AgentRouter 登录账号的 `api_user` 是预期用户 ID；登录后必须与 `/api/user/self` 返回的 ID 一致，否则任务会失败，防止签到到错误账号
 - `access_token`：系统访问令牌登录方式，仅适用于查询资料或明确提供独立签到接口的平台；必须搭配 `api_user`
 - `cookies`：兼容旧版的 session cookies 登录方式
 - `api_user`：访问令牌或 session cookies 登录时用于请求头的 new-api-user 参数；邮箱密码登录可省略

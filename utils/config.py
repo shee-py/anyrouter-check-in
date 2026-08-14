@@ -262,6 +262,9 @@ def _load_agentrouter_login_accounts_from_env() -> list[AccountConfig] | None:
 		if not identifier or not normalized.get('password'):
 			print(f'ERROR: AgentRouter login account {i + 1} missing username/email or password')
 			return None
+		if not normalized.get('api_user'):
+			print(f'ERROR: AgentRouter login account {i + 1} missing expected api_user')
+			return None
 		if 'name' in normalized and not normalized['name']:
 			print(f'ERROR: AgentRouter login account {i + 1} name field cannot be empty')
 			return None
