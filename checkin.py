@@ -363,8 +363,21 @@ def run_agentrouter_login_requests(
 							return False, None, None
 
 						login_data = result['data']
+						expected_user_id = str(account.api_user or '')
+						login_user_id = str(login_data.get('id') or '')
+						if not expected_user_id or login_user_id != expected_user_id:
+							print(
+								f'[FAILED] {account_name}: Login response account ID mismatch '
+								f'(expected {expected_user_id or "configured ID"}, got {login_user_id or "unknown"})'
+							)
+							return False, None, user_data_to_info(login_data)
+
 						user_info_url = f'{provider_config.domain}{provider_config.user_info_path}'
-						user_info_after = get_user_info(client, headers, user_info_url)
+						profile_headers = dict(headers)
+						if account.access_token:
+							profile_headers['Authorization'] = f'Bearer {account.access_token}'
+							profile_headers[provider_config.api_user_key] = expected_user_id
+						user_info_after = get_user_info(client, profile_headers, user_info_url)
 						if not user_info_after.get('success'):
 							error = user_info_after.get('error', 'Unknown error')
 							print(
@@ -372,7 +385,6 @@ def run_agentrouter_login_requests(
 							)
 							return False, None, user_info_after
 
-						expected_user_id = str(account.api_user or '')
 						actual_user_id = str(user_info_after.get('id') or '')
 						if not expected_user_id or actual_user_id != expected_user_id:
 							print(

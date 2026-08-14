@@ -101,6 +101,9 @@ jobs:
         ANYROUTER_ACCOUNTS: ${{ secrets.ANYROUTER_ACCOUNTS }}
         # 手动执行或北京时间 10:00 的计划才注入登录凭据，避免一天重复登录四次。
         AGENTROUTER_LOGIN_ACCOUNTS: ${{ (github.event_name == 'workflow_dispatch' || github.event.schedule == '0 2 * * *') && secrets.AGENTROUTER_LOGIN_ACCOUNTS || '' }}
+        AGENTROUTER_ACCESS_TOKEN: ${{ (github.event_name == 'workflow_dispatch' || github.event.schedule == '0 2 * * *') && secrets.AGENTROUTER_ACCESS_TOKEN || '' }}
+        AGENTROUTER_API_USER: ${{ (github.event_name == 'workflow_dispatch' || github.event.schedule == '0 2 * * *') && secrets.AGENTROUTER_API_USER || '' }}
+        AGENTROUTER_ACCOUNTS: ${{ (github.event_name == 'workflow_dispatch' || github.event.schedule == '0 2 * * *') && secrets.AGENTROUTER_ACCOUNTS || '' }}
         PROVIDERS: ${{ secrets.PROVIDERS }}
         DINGDING_WEBHOOK: ${{ secrets.DINGDING_WEBHOOK }}
         EMAIL_USER: ${{ secrets.EMAIL_USER }}
