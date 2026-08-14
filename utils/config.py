@@ -301,7 +301,18 @@ def load_accounts_config() -> list[AccountConfig] | None:
 		)
 
 	if agentrouter_login_accounts:
-		# Access Token 只能查询资料，不能触发 AgentRouter 登录奖励。生产签到优先且仅使用真实登录账号。
+		# 登录凭据负责触发奖励；旧版 Access Token 按用户 ID 合并，仅用于读取并核验真实余额。
+		legacy_agentrouter_accounts = list(agentrouter_accounts)
+		if agentrouter_account:
+			legacy_agentrouter_accounts.append(agentrouter_account)
+		access_tokens_by_user = {
+			str(account.api_user): account.access_token
+			for account in legacy_agentrouter_accounts
+			if account.api_user and account.access_token
+		}
+		for login_account in agentrouter_login_accounts:
+			login_account.access_token = access_tokens_by_user.get(str(login_account.api_user))
+
 		agentrouter_account = None
 		agentrouter_accounts = []
 

@@ -57,7 +57,7 @@
 5. 点击 "Add environment secret" 创建 secret：
    - `ANYROUTER_ACCOUNTS`: 你的多账号配置数据（JSON 格式）
    - `AGENTROUTER_LOGIN_ACCOUNTS`: AgentRouter 真实登录账号的 JSON 数组。AgentRouter 仅在登录响应返回 `checked_in: true` 时发放每日奖励，因此自动签到必须使用用户名/邮箱和密码。
-   - （仅余额查询兼容）`AGENTROUTER_ACCESS_TOKEN`、`AGENTROUTER_API_USER` 与 `AGENTROUTER_ACCOUNTS`: 旧版 Access Token 配置仍可查询余额，但不会被视为真实签到。配置 `AGENTROUTER_LOGIN_ACCOUNTS` 后会自动忽略这些旧版 AgentRouter 账号，避免重复处理。
+   - `AGENTROUTER_ACCESS_TOKEN`、`AGENTROUTER_API_USER` 与 `AGENTROUTER_ACCOUNTS`: Access Token 不负责签到；配置真实登录账号后，会按 `api_user` 自动合并对应令牌，用于登录后读取并验证真实余额。
 
 ### 4. 多账号配置格式
 

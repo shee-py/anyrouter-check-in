@@ -112,6 +112,7 @@ def test_agentrouter_real_login_requires_checked_in_true(capsys):
 		username='login-user',
 		password='secret-login-password',
 		api_user='342843',
+		access_token='secret-profile-token',
 	)
 	provider_config = AppConfig.load_from_env().get_provider('agentrouter')
 	assert provider_config is not None
@@ -121,7 +122,7 @@ def test_agentrouter_real_login_requires_checked_in_true(capsys):
 	response.status_code = 200
 	response.json.return_value = {
 		'success': True,
-		'data': {'quota': 112500000, 'used_quota': 0, 'checked_in': True},
+		'data': {'id': 342843, 'quota': 112500000, 'used_quota': 0, 'checked_in': True},
 	}
 	client.post.return_value = response
 	profile_response = MagicMock()
@@ -150,9 +151,13 @@ def test_agentrouter_real_login_requires_checked_in_true(capsys):
 		'username': 'login-user',
 		'password': 'secret-login-password',
 	}
+	profile_headers = client.get.call_args.kwargs['headers']
+	assert profile_headers['Authorization'] == 'Bearer secret-profile-token'
+	assert profile_headers['new-api-user'] == '342843'
 	output = capsys.readouterr().out
 	assert 'confirmed daily reward issued' in output
 	assert 'secret-login-password' not in output
+	assert 'secret-profile-token' not in output
 
 
 def test_agentrouter_real_login_without_reward_fails(capsys):
@@ -171,7 +176,7 @@ def test_agentrouter_real_login_without_reward_fails(capsys):
 	response.status_code = 200
 	response.json.return_value = {
 		'success': True,
-		'data': {'quota': 100000000, 'used_quota': 0, 'checked_in': False},
+		'data': {'id': 342843, 'quota': 100000000, 'used_quota': 0, 'checked_in': False},
 	}
 	client.post.return_value = response
 	profile_response = MagicMock()
@@ -216,7 +221,7 @@ def test_agentrouter_real_login_rejects_wrong_authenticated_account(capsys):
 	login_response.status_code = 200
 	login_response.json.return_value = {
 		'success': True,
-		'data': {'checked_in': True},
+		'data': {'id': 342843, 'checked_in': True},
 	}
 	profile_response = MagicMock()
 	profile_response.status_code = 200
@@ -264,7 +269,7 @@ def test_agentrouter_real_login_retries_transient_waf_response(monkeypatch, caps
 	valid_response.status_code = 200
 	valid_response.json.return_value = {
 		'success': True,
-		'data': {'quota': 112500000, 'used_quota': 0, 'checked_in': True},
+		'data': {'id': 342843, 'quota': 112500000, 'used_quota': 0, 'checked_in': True},
 	}
 	client = MagicMock()
 	client.post.side_effect = [invalid_response, valid_response]
@@ -642,7 +647,7 @@ def test_agentrouter_login_accounts_replace_legacy_token_accounts(monkeypatch, c
 
 	assert accounts is not None
 	assert [account.name for account in accounts] == ['AgentRouter 342842', 'AgentRouter 342843']
-	assert all(account.access_token is None for account in accounts)
+	assert [account.access_token for account in accounts] == ['legacy-main-token', 'legacy-second-token']
 	assert [account.get_login_identifier() for account in accounts] == ['first-user', 'second-user']
 	output = capsys.readouterr().out
 	assert 'first-password' not in output
