@@ -96,6 +96,7 @@ def test_agentrouter_username_password_parsing():
 			'provider': 'agentrouter',
 			'username': 'login-user',
 			'password': 'login-password',
+			'api_user': '342843',
 		},
 		0,
 	)
@@ -110,6 +111,7 @@ def test_agentrouter_real_login_requires_checked_in_true(capsys):
 		provider='agentrouter',
 		username='login-user',
 		password='secret-login-password',
+		api_user='342843',
 	)
 	provider_config = AppConfig.load_from_env().get_provider('agentrouter')
 	assert provider_config is not None
@@ -122,6 +124,13 @@ def test_agentrouter_real_login_requires_checked_in_true(capsys):
 		'data': {'quota': 112500000, 'used_quota': 0, 'checked_in': True},
 	}
 	client.post.return_value = response
+	profile_response = MagicMock()
+	profile_response.status_code = 200
+	profile_response.json.return_value = {
+		'success': True,
+		'data': {'id': 342843, 'username': 'login-user', 'quota': 112500000, 'used_quota': 0},
+	}
+	client.get.return_value = profile_response
 	client_context = MagicMock()
 	client_context.__enter__.return_value = client
 
@@ -152,6 +161,7 @@ def test_agentrouter_real_login_without_reward_fails(capsys):
 		provider='agentrouter',
 		username='login-user',
 		password='secret-login-password',
+		api_user='342843',
 	)
 	provider_config = AppConfig.load_from_env().get_provider('agentrouter')
 	assert provider_config is not None
@@ -164,6 +174,13 @@ def test_agentrouter_real_login_without_reward_fails(capsys):
 		'data': {'quota': 100000000, 'used_quota': 0, 'checked_in': False},
 	}
 	client.post.return_value = response
+	profile_response = MagicMock()
+	profile_response.status_code = 200
+	profile_response.json.return_value = {
+		'success': True,
+		'data': {'id': 342843, 'username': 'login-user', 'quota': 100000000, 'used_quota': 0},
+	}
+	client.get.return_value = profile_response
 	client_context = MagicMock()
 	client_context.__enter__.return_value = client
 
@@ -184,12 +201,58 @@ def test_agentrouter_real_login_without_reward_fails(capsys):
 	assert 'secret-login-password' not in output
 
 
+def test_agentrouter_real_login_rejects_wrong_authenticated_account(capsys):
+	account = AccountConfig(
+		name='AgentRouter Login',
+		provider='agentrouter',
+		username='login-user',
+		password='secret-login-password',
+		api_user='342843',
+	)
+	provider_config = AppConfig.load_from_env().get_provider('agentrouter')
+	assert provider_config is not None
+
+	login_response = MagicMock()
+	login_response.status_code = 200
+	login_response.json.return_value = {
+		'success': True,
+		'data': {'checked_in': True},
+	}
+	profile_response = MagicMock()
+	profile_response.status_code = 200
+	profile_response.json.return_value = {
+		'success': True,
+		'data': {'id': 999999, 'username': 'wrong-user', 'quota': 12500000, 'used_quota': 0},
+	}
+	client = MagicMock()
+	client.post.return_value = login_response
+	client.get.return_value = profile_response
+	client_context = MagicMock()
+	client_context.__enter__.return_value = client
+
+	with patch('httpx.Client', return_value=client_context):
+		success, _, after = run_agentrouter_login_requests(
+			{'acw_tc': 'waf-cookie'},
+			account,
+			'AgentRouter Login',
+			provider_config,
+			use_proxy=False,
+		)
+
+	assert success is False
+	assert after['id'] == 999999
+	output = capsys.readouterr().out
+	assert 'Authenticated account ID mismatch' in output
+	assert 'secret-login-password' not in output
+
+
 def test_agentrouter_real_login_retries_transient_waf_response(monkeypatch, capsys):
 	account = AccountConfig(
 		name='AgentRouter Login',
 		provider='agentrouter',
 		username='login-user',
 		password='secret-login-password',
+		api_user='342843',
 	)
 	provider_config = AppConfig.load_from_env().get_provider('agentrouter')
 	assert provider_config is not None
@@ -205,6 +268,13 @@ def test_agentrouter_real_login_retries_transient_waf_response(monkeypatch, caps
 	}
 	client = MagicMock()
 	client.post.side_effect = [invalid_response, valid_response]
+	profile_response = MagicMock()
+	profile_response.status_code = 200
+	profile_response.json.return_value = {
+		'success': True,
+		'data': {'id': 342843, 'username': 'login-user', 'quota': 112500000, 'used_quota': 0},
+	}
+	client.get.return_value = profile_response
 	client_context = MagicMock()
 	client_context.__enter__.return_value = client
 	monkeypatch.setattr('checkin.time.sleep', lambda _seconds: None)
@@ -552,8 +622,18 @@ def test_agentrouter_login_accounts_replace_legacy_token_accounts(monkeypatch, c
 		'AGENTROUTER_LOGIN_ACCOUNTS',
 		json.dumps(
 			[
-				{'name': 'AgentRouter 342842', 'username': 'first-user', 'password': 'first-password'},
-				{'name': 'AgentRouter 342843', 'username': 'second-user', 'password': 'second-password'},
+				{
+					'name': 'AgentRouter 342842',
+					'username': 'first-user',
+					'password': 'first-password',
+					'api_user': '342842',
+				},
+				{
+					'name': 'AgentRouter 342843',
+					'username': 'second-user',
+					'password': 'second-password',
+					'api_user': '342843',
+				},
 			]
 		),
 	)

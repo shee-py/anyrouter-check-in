@@ -274,6 +274,8 @@ def get_user_info(client, headers, user_info_url: str, *, attempts: int = 3):
 						'success': True,
 						'quota': quota,
 						'used_quota': used_quota,
+						'id': user_data.get('id'),
+						'username': user_data.get('username'),
 						'display': f':money: Current balance: ${quota}, Used: ${used_quota}',
 					}
 			last_error = f'HTTP {response.status_code}'
@@ -295,6 +297,8 @@ def user_data_to_info(user_data: dict) -> dict:
 		'success': True,
 		'quota': quota,
 		'used_quota': used_quota,
+		'id': user_data.get('id'),
+		'username': user_data.get('username'),
 		'display': f':money: Current balance: ${quota}, Used: ${used_quota}',
 	}
 
@@ -358,11 +362,28 @@ def run_agentrouter_login_requests(
 							print(f'[FAILED] {account_name}: AgentRouter login failed - {message}')
 							return False, None, None
 
-						user_data = result['data']
-						user_info_after = user_data_to_info(user_data)
+						login_data = result['data']
+						user_info_url = f'{provider_config.domain}{provider_config.user_info_path}'
+						user_info_after = get_user_info(client, headers, user_info_url)
+						if not user_info_after.get('success'):
+							error = user_info_after.get('error', 'Unknown error')
+							print(
+								f'[FAILED] {account_name}: Login succeeded but authenticated profile failed - {error}'
+							)
+							return False, None, user_info_after
+
+						expected_user_id = str(account.api_user or '')
+						actual_user_id = str(user_info_after.get('id') or '')
+						if not expected_user_id or actual_user_id != expected_user_id:
+							print(
+								f'[FAILED] {account_name}: Authenticated account ID mismatch '
+								f'(expected {expected_user_id or "configured ID"}, got {actual_user_id or "unknown"})'
+							)
+							return False, None, user_info_after
+
 						print(user_info_after['display'])
 
-						if user_data.get('checked_in') is True:
+						if login_data.get('checked_in') is True:
 							print(f'[SUCCESS] {account_name}: AgentRouter confirmed daily reward issued')
 							return True, None, user_info_after
 
