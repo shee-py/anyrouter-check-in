@@ -56,8 +56,8 @@
 4. 点击新建的 `production` 环境进入环境配置页
 5. 点击 "Add environment secret" 创建 secret：
    - `ANYROUTER_ACCOUNTS`: 你的多账号配置数据（JSON 格式）
-   - （可选）`AGENTROUTER_ACCESS_TOKEN` 与 `AGENTROUTER_API_USER`: 独立配置一个 AgentRouter 账号。若设置这两个 Secret，系统会自动追加一个 AgentRouter 账号，可保留已有 `ANYROUTER_ACCOUNTS` 配置不用改动；若未设置 `ANYROUTER_ACCOUNTS`，也允许仅配置这两个 Secret 来运行 AgentRouter 账号。
-   - （可选）`AGENTROUTER_ACCOUNTS`: 多个 AgentRouter 账号的 JSON 数组。数组中的账号会追加到现有账号，不会覆盖其他配置。
+   - `AGENTROUTER_LOGIN_ACCOUNTS`: AgentRouter 真实登录账号的 JSON 数组。AgentRouter 仅在登录响应返回 `checked_in: true` 时发放每日奖励，因此自动签到必须使用用户名/邮箱和密码。
+   - （仅余额查询兼容）`AGENTROUTER_ACCESS_TOKEN`、`AGENTROUTER_API_USER` 与 `AGENTROUTER_ACCOUNTS`: 旧版 Access Token 配置仍可查询余额，但不会被视为真实签到。配置 `AGENTROUTER_LOGIN_ACCOUNTS` 后会自动忽略这些旧版 AgentRouter 账号，避免重复处理。
 
 ### 4. 多账号配置格式
 
@@ -79,22 +79,27 @@
 ]
 ```
 
-多个 AgentRouter 账号也可以单独使用 `AGENTROUTER_ACCOUNTS` Secret：
+AgentRouter 自动签到请单独使用 `AGENTROUTER_LOGIN_ACCOUNTS` Secret：
 
 ```json
 [
   {
+    "name": "AgentRouter 账号 1",
+    "username": "your-login-name",
+    "password": "your-login-password"
+  },
+  {
     "name": "AgentRouter 账号 2",
-    "access_token": "sk-your-access-token",
-    "api_user": "342843"
+    "email": "your-login-email@example.com",
+    "password": "your-login-password"
   }
 ]
 ```
 
 **字段说明**：
 
-- `email` + `password`：推荐的浏览器登录方式，登录成功后会自动获取 cookies 与用户标识
-- `access_token`：系统访问令牌登录方式（支持 AgentRouter 等平台），GitHub Actions 会自动获取所需 WAF cookie，不需要手工复制 Cookie；必须搭配 `api_user`
+- `username`/`email` + `password`：真实登录方式；AgentRouter 每日奖励必须使用此方式
+- `access_token`：系统访问令牌登录方式，仅适用于查询资料或明确提供独立签到接口的平台；必须搭配 `api_user`
 - `cookies`：兼容旧版的 session cookies 登录方式
 - `api_user`：访问令牌或 session cookies 登录时用于请求头的 new-api-user 参数；邮箱密码登录可省略
 - `provider` (可选)：指定使用的服务商，默认为 `anyrouter`
@@ -105,7 +110,7 @@
 - 如果未提供 `provider` 字段，默认使用 `anyrouter`（向后兼容）
 - 如果未提供 `name` 字段，会使用 `Account 1`、`Account 2` 等默认名称
 - `anyrouter` 与 `agentrouter` 配置已内置，无需填写
-- AgentRouter 平台由后端根据访问令牌或 Cookie 调用 `/api/user/self` 时自动触发登录签到，并按 `quota_per_unit=500000` 进行余额/消耗换算（$1.00 = 500,000 quota）
+- AgentRouter 平台通过 `POST /api/user/login` 真实登录；只有响应中的 `checked_in` 为 `true` 才判定当天奖励发放成功，并按 `quota_per_unit=500000` 进行余额/消耗换算（$1.00 = 500,000 quota）
 
 如果使用 session cookies 登录，接下来获取 cookies 与 api_user 的值。
 
@@ -136,7 +141,7 @@
 
 ## 执行时间
 
-- 脚本每 6 小时执行一次（1. action 无法准确触发，基本延时 1~1.5h；2. 目前观测到 anyrouter 的签到是每 24h 而不是零点就可签到）
+- AnyRouter 每 6 小时重试一次；AgentRouter 每天北京时间 10:00 真实登录一次。GitHub Actions 可能有少量排队延迟
 - 你也可以随时手动触发签到
 
 ## 注意事项
@@ -277,7 +282,7 @@
   - `sign_in_path: "/api/user/sign_in"`
 - `agentrouter`：
   - `bypass_method: "waf_cookies"`（需要获取 `acw_tc`）
-  - `sign_in_path: null`（查询用户信息时自动签到）
+  - `sign_in_path: null`（签到由真实登录接口完成，而不是 `/api/user/self` 查询）
   - `use_proxy: true`
 
 **重要提示**：

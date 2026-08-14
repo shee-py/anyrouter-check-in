@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from checkin import check_in_account, get_user_info, run_check_in_requests
+from checkin import check_in_account, get_user_info, run_agentrouter_login_requests, run_check_in_requests
 from utils.config import AccountConfig, AppConfig, load_accounts_config
 
 
@@ -87,6 +87,142 @@ def test_auth_priority_email_over_access_token():
 	config = AccountConfig.from_dict(data, 0)
 	assert config.has_login_credentials() is True
 	assert config.has_access_token() is True
+
+
+def test_agentrouter_username_password_parsing():
+	config = AccountConfig.from_dict(
+		{
+			'name': 'AgentRouter Login',
+			'provider': 'agentrouter',
+			'username': 'login-user',
+			'password': 'login-password',
+		},
+		0,
+	)
+
+	assert config.has_login_credentials() is True
+	assert config.get_login_identifier() == 'login-user'
+
+
+def test_agentrouter_real_login_requires_checked_in_true(capsys):
+	account = AccountConfig(
+		name='AgentRouter Login',
+		provider='agentrouter',
+		username='login-user',
+		password='secret-login-password',
+	)
+	provider_config = AppConfig.load_from_env().get_provider('agentrouter')
+	assert provider_config is not None
+
+	client = MagicMock()
+	response = MagicMock()
+	response.status_code = 200
+	response.json.return_value = {
+		'success': True,
+		'data': {'quota': 112500000, 'used_quota': 0, 'checked_in': True},
+	}
+	client.post.return_value = response
+	client_context = MagicMock()
+	client_context.__enter__.return_value = client
+
+	with patch('httpx.Client', return_value=client_context):
+		success, before, after = run_agentrouter_login_requests(
+			{'acw_tc': 'waf-cookie'},
+			account,
+			'AgentRouter Login',
+			provider_config,
+			use_proxy=False,
+		)
+
+	assert success is True
+	assert before is None
+	assert after['quota'] == 225.0
+	assert client.post.call_args.kwargs['json'] == {
+		'username': 'login-user',
+		'password': 'secret-login-password',
+	}
+	output = capsys.readouterr().out
+	assert 'confirmed daily reward issued' in output
+	assert 'secret-login-password' not in output
+
+
+def test_agentrouter_real_login_without_reward_fails(capsys):
+	account = AccountConfig(
+		name='AgentRouter Login',
+		provider='agentrouter',
+		username='login-user',
+		password='secret-login-password',
+	)
+	provider_config = AppConfig.load_from_env().get_provider('agentrouter')
+	assert provider_config is not None
+
+	client = MagicMock()
+	response = MagicMock()
+	response.status_code = 200
+	response.json.return_value = {
+		'success': True,
+		'data': {'quota': 100000000, 'used_quota': 0, 'checked_in': False},
+	}
+	client.post.return_value = response
+	client_context = MagicMock()
+	client_context.__enter__.return_value = client
+
+	with patch('httpx.Client', return_value=client_context):
+		success, before, after = run_agentrouter_login_requests(
+			{'acw_tc': 'waf-cookie'},
+			account,
+			'AgentRouter Login',
+			provider_config,
+			use_proxy=False,
+		)
+
+	assert success is False
+	assert before is None
+	assert after['quota'] == 200.0
+	output = capsys.readouterr().out
+	assert 'no daily reward was issued' in output
+	assert 'secret-login-password' not in output
+
+
+def test_agentrouter_real_login_retries_transient_waf_response(monkeypatch, capsys):
+	account = AccountConfig(
+		name='AgentRouter Login',
+		provider='agentrouter',
+		username='login-user',
+		password='secret-login-password',
+	)
+	provider_config = AppConfig.load_from_env().get_provider('agentrouter')
+	assert provider_config is not None
+
+	invalid_response = MagicMock()
+	invalid_response.status_code = 200
+	invalid_response.json.side_effect = ValueError('temporary WAF response')
+	valid_response = MagicMock()
+	valid_response.status_code = 200
+	valid_response.json.return_value = {
+		'success': True,
+		'data': {'quota': 112500000, 'used_quota': 0, 'checked_in': True},
+	}
+	client = MagicMock()
+	client.post.side_effect = [invalid_response, valid_response]
+	client_context = MagicMock()
+	client_context.__enter__.return_value = client
+	monkeypatch.setattr('checkin.time.sleep', lambda _seconds: None)
+
+	with patch('httpx.Client', return_value=client_context):
+		success, _, _ = run_agentrouter_login_requests(
+			{'acw_tc': 'waf-cookie'},
+			account,
+			'AgentRouter Login',
+			provider_config,
+			use_proxy=False,
+		)
+
+	assert success is True
+	assert client.post.call_count == 2
+	output = capsys.readouterr().out
+	assert 'retrying' in output
+	assert 'secret-login-password' not in output
 
 
 def test_run_check_in_requests_injects_authorization_header(monkeypatch, capsys):
@@ -356,7 +492,12 @@ def test_load_accounts_config_appends_multiple_agentrouter_accounts(monkeypatch,
 		json.dumps(
 			[
 				{'name': 'AgentRouter 1', 'access_token': first_token, 'api_user': '342843'},
-				{'name': 'AgentRouter 2', 'provider': 'agentrouter', 'access_token': second_token, 'api_user': '342844'},
+				{
+					'name': 'AgentRouter 2',
+					'provider': 'agentrouter',
+					'access_token': second_token,
+					'api_user': '342844',
+				},
 			]
 		),
 	)
@@ -397,6 +538,37 @@ def test_load_accounts_config_only_agentrouter_accounts_array(monkeypatch, capsy
 	captured = capsys.readouterr()
 	assert secret_token not in captured.out
 	assert secret_token not in captured.err
+
+
+def test_agentrouter_login_accounts_replace_legacy_token_accounts(monkeypatch, capsys):
+	monkeypatch.delenv('ANYROUTER_ACCOUNTS', raising=False)
+	monkeypatch.setenv('AGENTROUTER_ACCESS_TOKEN', 'legacy-main-token')
+	monkeypatch.setenv('AGENTROUTER_API_USER', '342842')
+	monkeypatch.setenv(
+		'AGENTROUTER_ACCOUNTS',
+		json.dumps([{'name': 'Legacy second', 'access_token': 'legacy-second-token', 'api_user': '342843'}]),
+	)
+	monkeypatch.setenv(
+		'AGENTROUTER_LOGIN_ACCOUNTS',
+		json.dumps(
+			[
+				{'name': 'AgentRouter 342842', 'username': 'first-user', 'password': 'first-password'},
+				{'name': 'AgentRouter 342843', 'username': 'second-user', 'password': 'second-password'},
+			]
+		),
+	)
+
+	accounts = load_accounts_config()
+
+	assert accounts is not None
+	assert [account.name for account in accounts] == ['AgentRouter 342842', 'AgentRouter 342843']
+	assert all(account.access_token is None for account in accounts)
+	assert [account.get_login_identifier() for account in accounts] == ['first-user', 'second-user']
+	output = capsys.readouterr().out
+	assert 'first-password' not in output
+	assert 'second-password' not in output
+	assert 'legacy-main-token' not in output
+	assert 'legacy-second-token' not in output
 
 
 def test_load_accounts_config_agentrouter_accounts_invalid_json(monkeypatch, capsys):
