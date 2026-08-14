@@ -1,7 +1,9 @@
 name: AnyRouter 自动签到
 on:
   schedule:
+    # AnyRouter 保持每 6 小时重试；AgentRouter 仅在北京时间 10:00 的独立计划中真实登录一次。
     - cron: '0 */6 * * *'
+    - cron: '0 2 * * *'
   workflow_dispatch:
     inputs:
       debug:
@@ -97,9 +99,8 @@ jobs:
         CHECKIN_HUMANIZE: true
         CHECKIN_WAIT_TIMEOUT_MS: 120000
         ANYROUTER_ACCOUNTS: ${{ secrets.ANYROUTER_ACCOUNTS }}
-        AGENTROUTER_ACCESS_TOKEN: ${{ secrets.AGENTROUTER_ACCESS_TOKEN }}
-        AGENTROUTER_API_USER: ${{ secrets.AGENTROUTER_API_USER }}
-        AGENTROUTER_ACCOUNTS: ${{ secrets.AGENTROUTER_ACCOUNTS }}
+        # 手动执行或北京时间 10:00 的计划才注入登录凭据，避免一天重复登录四次。
+        AGENTROUTER_LOGIN_ACCOUNTS: ${{ (github.event_name == 'workflow_dispatch' || github.event.schedule == '0 2 * * *') && secrets.AGENTROUTER_LOGIN_ACCOUNTS || '' }}
         PROVIDERS: ${{ secrets.PROVIDERS }}
         DINGDING_WEBHOOK: ${{ secrets.DINGDING_WEBHOOK }}
         EMAIL_USER: ${{ secrets.EMAIL_USER }}

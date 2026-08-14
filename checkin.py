@@ -287,6 +287,101 @@ def get_user_info(client, headers, user_info_url: str, *, attempts: int = 3):
 	return {'success': False, 'error': f'Failed to get user info: {last_error}'}
 
 
+def user_data_to_info(user_data: dict) -> dict:
+	"""将 NewAPI 用户数据转换成统一余额结构。"""
+	quota = round(user_data.get('quota', 0) / 500000, 2)
+	used_quota = round(user_data.get('used_quota', 0) / 500000, 2)
+	return {
+		'success': True,
+		'quota': quota,
+		'used_quota': used_quota,
+		'display': f':money: Current balance: ${quota}, Used: ${used_quota}',
+	}
+
+
+def run_agentrouter_login_requests(
+	all_cookies: dict,
+	account: AccountConfig,
+	account_name: str,
+	provider_config,
+	*,
+	use_proxy: bool = False,
+) -> tuple[bool, dict | None, dict | None]:
+	"""真实登录 AgentRouter，并以 checked_in 字段确认当天奖励。"""
+	identifier = account.get_login_identifier()
+	if not identifier or not account.password:
+		print(f'[FAILED] {account_name}: Missing AgentRouter login credentials')
+		return False, None, None
+
+	client_kwargs: dict = {'http2': True, 'timeout': 30.0}
+	proxy_url = get_proxy_server(use_proxy=use_proxy)
+	if proxy_url:
+		client_kwargs['proxy'] = proxy_url
+		print(f'[INFO] {account_name}: HTTP client proxy enabled')
+	elif use_proxy:
+		print(f'[WARN] {account_name}: Provider requires proxy but CHECKIN_PROXY_URL is not set')
+
+	headers = {
+		'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
+		'Accept': 'application/json, text/plain, */*',
+		'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+		'Accept-Encoding': 'gzip, deflate',
+		'Content-Type': 'application/json',
+		'Referer': f'{provider_config.domain}/login',
+		'Origin': provider_config.domain,
+		'Sec-Fetch-Dest': 'empty',
+		'Sec-Fetch-Mode': 'cors',
+		'Sec-Fetch-Site': 'same-origin',
+	}
+	login_url = f'{provider_config.domain}/api/user/login?turnstile='
+
+	try:
+		with httpx.Client(**client_kwargs) as client:
+			if all_cookies:
+				client.cookies.update(all_cookies)
+
+			last_error = 'Unknown error'
+			for attempt in range(1, 4):
+				try:
+					response = client.post(
+						login_url,
+						headers=headers,
+						json={'username': identifier, 'password': account.password},
+						timeout=30,
+					)
+					if response.status_code != 200:
+						last_error = f'HTTP {response.status_code}'
+					else:
+						result = response.json()
+						if not result.get('success') or not isinstance(result.get('data'), dict):
+							message = result.get('message') or 'Login response was not successful'
+							print(f'[FAILED] {account_name}: AgentRouter login failed - {message}')
+							return False, None, None
+
+						user_data = result['data']
+						user_info_after = user_data_to_info(user_data)
+						print(user_info_after['display'])
+
+						if user_data.get('checked_in') is True:
+							print(f'[SUCCESS] {account_name}: AgentRouter confirmed daily reward issued')
+							return True, None, user_info_after
+
+						print(f'[FAILED] {account_name}: AgentRouter login succeeded but no daily reward was issued')
+						return False, None, user_info_after
+				except Exception as e:
+					last_error = f'{str(e)[:50]}...'
+
+				if attempt < 3:
+					print(f'[WARN] {account_name}: AgentRouter login request failed ({attempt}/3), retrying...')
+					time.sleep(attempt)
+
+			print(f'[FAILED] {account_name}: AgentRouter login request failed - {last_error}')
+			return False, None, None
+	except Exception as e:
+		print(f'[FAILED] {account_name}: AgentRouter login request failed - {str(e)[:50]}...')
+		return False, None, None
+
+
 async def prepare_cookies(account_name: str, provider_config, user_cookies: dict) -> dict | None:
 	"""准备请求所需的 cookies（可能包含 WAF cookies）"""
 	waf_cookies = {}
@@ -399,14 +494,28 @@ async def check_in_account(account: AccountConfig, account_index: int, app_confi
 	auth_method = None
 	access_token = None
 
-	if account.has_login_credentials():
+	if account.provider == 'agentrouter' and account.has_login_credentials():
+		print(f'[INFO] {account_name}: Preparing real AgentRouter login check-in...')
+		all_cookies = await prepare_cookies(account_name, provider_config, {})
+		if all_cookies is None:
+			return False, None, None
+		print(f'[AUTH] {account_name}: Using auth method -> username/password login API')
+		return run_agentrouter_login_requests(
+			all_cookies,
+			account,
+			account_name,
+			provider_config,
+			use_proxy=provider_config.use_proxy,
+		)
+	elif account.has_login_credentials():
 		print(f'[INFO] {account_name}: Attempting email/password login (priority)...')
-		assert account.email is not None and account.password is not None
+		login_identifier = account.get_login_identifier()
+		assert login_identifier is not None and account.password is not None
 		login_result = await login_with_credentials(
 			account_name,
 			provider_config,
 			account.provider,
-			account.email,
+			login_identifier,
 			account.password,
 		)
 		if login_result:

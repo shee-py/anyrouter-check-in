@@ -99,7 +99,7 @@ class AppConfig:
 				# 官方公告确认该备用域名与主站 API 完全一致，且对 GitHub Runner 的 WAF 更稳定。
 				domain='https://ps.air-outer.com',
 				login_path='/login',
-				sign_in_path=None,  # 首次鉴权查询用户信息时由 AgentRouter 自动签到
+				sign_in_path=None,  # 每日奖励由 /api/user/login 登录响应中的 checked_in 字段确认
 				user_info_path='/api/user/self',
 				api_user_key='new-api-user',
 				bypass_method='waf_cookies',
@@ -155,6 +155,7 @@ class AccountConfig:
 	provider: str = 'anyrouter'
 	name: str | None = None
 	email: str | None = None
+	username: str | None = None
 	password: str | None = None
 	access_token: str | None = None
 
@@ -170,13 +171,18 @@ class AccountConfig:
 			provider=provider,
 			name=name if name else None,
 			email=data.get('email'),
+			username=data.get('username'),
 			password=data.get('password'),
 			access_token=data.get('access_token'),
 		)
 
 	def has_login_credentials(self) -> bool:
-		"""是否配置了邮箱密码登录"""
-		return bool(self.email and self.password)
+		"""是否配置了用户名/邮箱与密码登录"""
+		return bool((self.username or self.email) and self.password)
+
+	def get_login_identifier(self) -> str | None:
+		"""返回登录用户名或邮箱。"""
+		return self.username or self.email
 
 	def has_access_token(self) -> bool:
 		"""是否配置了系统访问令牌 (access_token)"""
@@ -228,6 +234,43 @@ def _load_agentrouter_accounts_from_env() -> list[AccountConfig] | None:
 	return accounts
 
 
+def _load_agentrouter_login_accounts_from_env() -> list[AccountConfig] | None:
+	"""加载可真正触发 AgentRouter 每日奖励的登录账号。"""
+	accounts_str = (os.getenv('AGENTROUTER_LOGIN_ACCOUNTS') or '').strip()
+	if not accounts_str:
+		return []
+
+	try:
+		accounts_data = json.loads(accounts_str)
+	except json.JSONDecodeError as e:
+		print(f'ERROR: AGENTROUTER_LOGIN_ACCOUNTS JSON 解析失败: {e}')
+		return None
+
+	if not isinstance(accounts_data, list):
+		print('ERROR: AGENTROUTER_LOGIN_ACCOUNTS must use array format [{}]')
+		return None
+
+	accounts = []
+	for i, account_dict in enumerate(accounts_data):
+		if not isinstance(account_dict, dict):
+			print(f'ERROR: AgentRouter login account {i + 1} configuration format is incorrect')
+			return None
+
+		normalized = dict(account_dict)
+		normalized.setdefault('provider', 'agentrouter')
+		identifier = normalized.get('username') or normalized.get('email')
+		if not identifier or not normalized.get('password'):
+			print(f'ERROR: AgentRouter login account {i + 1} missing username/email or password')
+			return None
+		if 'name' in normalized and not normalized['name']:
+			print(f'ERROR: AgentRouter login account {i + 1} name field cannot be empty')
+			return None
+
+		accounts.append(AccountConfig.from_dict(normalized, i))
+
+	return accounts
+
+
 def load_accounts_config() -> list[AccountConfig] | None:
 	"""从环境变量加载账号配置"""
 	accounts_str = os.getenv('ANYROUTER_ACCOUNTS')
@@ -235,6 +278,9 @@ def load_accounts_config() -> list[AccountConfig] | None:
 	agentrouter_api_user = (os.getenv('AGENTROUTER_API_USER') or '').strip()
 	agentrouter_accounts = _load_agentrouter_accounts_from_env()
 	if agentrouter_accounts is None:
+		return None
+	agentrouter_login_accounts = _load_agentrouter_login_accounts_from_env()
+	if agentrouter_login_accounts is None:
 		return None
 
 	agentrouter_account = None
@@ -251,8 +297,14 @@ def load_accounts_config() -> list[AccountConfig] | None:
 			api_user=agentrouter_api_user,
 		)
 
+	if agentrouter_login_accounts:
+		# Access Token 只能查询资料，不能触发 AgentRouter 登录奖励。生产签到优先且仅使用真实登录账号。
+		agentrouter_account = None
+		agentrouter_accounts = []
+
 	if not accounts_str:
-		standalone_accounts = list(agentrouter_accounts)
+		standalone_accounts = list(agentrouter_login_accounts)
+		standalone_accounts.extend(agentrouter_accounts)
 		if agentrouter_account:
 			standalone_accounts.insert(0, agentrouter_account)
 		if standalone_accounts:
@@ -306,6 +358,7 @@ def load_accounts_config() -> list[AccountConfig] | None:
 
 		if agentrouter_account:
 			accounts.append(agentrouter_account)
+		accounts.extend(agentrouter_login_accounts)
 		accounts.extend(agentrouter_accounts)
 
 		return accounts
