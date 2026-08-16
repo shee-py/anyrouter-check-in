@@ -554,11 +554,16 @@ async def run_browser_check_in_requests(
 		before = payload_info(result.get('before'))
 		after = payload_info(result.get('after'))
 		checkin_payload = (result.get('checkin') or {}).get('payload')
-		success = isinstance(checkin_payload, dict) and checkin_payload.get('success') is True
+		checkin_message = str((checkin_payload or {}).get('message') or '').lower()
+		already_checked = any(keyword in checkin_message for keyword in ('今日已签到', '已签到', 'already checked', 'already signed'))
+		success = (isinstance(checkin_payload, dict) and checkin_payload.get('success') is True) or already_checked
 		if before:
 			print(before['display'])
 		if success:
-			print(f'[SUCCESS] {account_name}: Check-in successful in browser session')
+			if already_checked:
+				print(f'[SUCCESS] {account_name}: Already checked in today (browser session verified)')
+			else:
+				print(f'[SUCCESS] {account_name}: Check-in successful in browser session')
 		else:
 			checkin_response = result.get('checkin') or {}
 			print(
