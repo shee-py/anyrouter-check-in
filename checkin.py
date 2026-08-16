@@ -474,6 +474,108 @@ def execute_check_in(client, account_name: str, provider_config, headers: dict):
 		return False
 
 
+async def run_browser_check_in_requests(
+	account: AccountConfig,
+	account_name: str,
+	provider_config,
+) -> tuple[bool, dict | None, dict | None]:
+	"""在浏览器会话内完成需要 Cloudflare/WAF 上下文的 New API 签到。"""
+	if not account.access_token or not account.api_user:
+		print(f'[FAILED] {account_name}: Missing access_token or api_user')
+		return False, None, None
+
+	settings = load_browser_login_settings(
+		account_name,
+		account.provider,
+		persist_profile=provider_config.persist_profile,
+	)
+	try:
+		context = await launch_login_context(settings, use_proxy=provider_config.use_proxy)
+	except Exception as e:
+		print(f'[FAILED] {account_name}: Browser launch failed: {e}')
+		return False, None, None
+
+	page = None
+	try:
+		page = await context.new_page()
+		await prepare_browser_page(page)
+		await navigate_login_page(
+			page,
+			f'{provider_config.domain}{provider_config.login_path}',
+			settings.wait_timeout_ms,
+			provider=account.provider,
+			account_name=account_name,
+		)
+		result = await page.evaluate(
+			"""async ({userInfoUrl, signInUrl, token, apiUser}) => {
+				const baseHeaders = {
+					'Accept': 'application/json, text/plain, */*',
+					'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+					'Authorization': `Bearer ${token}`,
+					'New-Api-User': apiUser,
+				};
+				async function request(url, init = {}) {
+					const response = await fetch(url, {
+						...init,
+						credentials: 'include',
+						headers: {...baseHeaders, ...(init.headers || {})},
+					});
+					const text = await response.text();
+					let payload = null;
+					try { payload = JSON.parse(text); } catch (_) {}
+					return {status: response.status, payload, text: text.slice(0, 300)};
+				}
+				const before = await request(userInfoUrl);
+				const checkin = await request(signInUrl, {
+					method: 'POST',
+					headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
+					body: '{}',
+				});
+				const after = await request(userInfoUrl);
+				return {before, checkin, after};
+			}""",
+			{
+				'userInfoUrl': f'{provider_config.domain}{provider_config.user_info_path}',
+				'signInUrl': f'{provider_config.domain}{provider_config.sign_in_path}',
+				'token': account.access_token,
+				'apiUser': str(account.api_user),
+			},
+		)
+
+		def payload_info(response: dict | None) -> dict | None:
+			if not isinstance(response, dict) or response.get('status') != 200:
+				return None
+			payload = response.get('payload')
+			if not isinstance(payload, dict) or payload.get('success') is not True:
+				return None
+			user_data = payload.get('data')
+			return user_data_to_info(user_data) if isinstance(user_data, dict) else None
+
+		before = payload_info(result.get('before'))
+		after = payload_info(result.get('after'))
+		checkin_payload = (result.get('checkin') or {}).get('payload')
+		success = isinstance(checkin_payload, dict) and checkin_payload.get('success') is True
+		if before:
+			print(before['display'])
+		if success:
+			print(f'[SUCCESS] {account_name}: Check-in successful in browser session')
+		else:
+			checkin_response = result.get('checkin') or {}
+			print(
+				f'[FAILED] {account_name}: Check-in failed - '
+				f'HTTP {checkin_response.get("status", "unknown")} '
+				f'{checkin_response.get("text", "")}'
+			)
+		await context.close()
+		return success, before, after
+	except Exception as e:
+		print(f'[FAILED] {account_name}: Browser check-in failed - {str(e)[:120]}')
+		if page is not None:
+			await save_login_screenshot(page, account.provider, account_name, 'browser-checkin-error')
+		await context.close()
+		return False, None, None
+
+
 def format_check_in_notification(detail: dict) -> str:
 	"""格式化签到通知消息"""
 	lines = [
@@ -562,6 +664,9 @@ async def check_in_account(account: AccountConfig, account_index: int, app_confi
 		if not account.api_user:
 			print(f'[FAILED] {account_name}: Missing required field (api_user) for access_token authentication')
 			return False, None, None
+		if provider_config.browser_requests:
+			print(f'[AUTH] {account_name}: Using browser-session access token authentication')
+			return await run_browser_check_in_requests(account, account_name, provider_config)
 		auth_method = 'access token'
 		access_token = account.access_token
 		if provider_config.needs_waf_cookies():

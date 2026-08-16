@@ -120,7 +120,8 @@ AgentRouter 自动签到请单独使用 `AGENTROUTER_LOGIN_ACCOUNTS` Secret：
     "domain": "https://muyuan.do",
     "sign_in_path": "/api/user/checkin",
     "user_info_path": "/api/user/self",
-    "api_user_key": "new-api-user"
+    "api_user_key": "new-api-user",
+    "browser_requests": true
   }
 }
 ```
