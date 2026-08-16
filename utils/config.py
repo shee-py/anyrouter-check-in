@@ -274,6 +274,41 @@ def _load_agentrouter_login_accounts_from_env() -> list[AccountConfig] | None:
 	return accounts
 
 
+def _load_extra_accounts_from_env() -> list[AccountConfig] | None:
+	"""加载独立扩展账号，避免修改既有 ANYROUTER_ACCOUNTS Secret。"""
+	accounts_str = (os.getenv('EXTRA_ACCOUNTS') or '').strip()
+	if not accounts_str:
+		return []
+
+	try:
+		accounts_data = json.loads(accounts_str)
+	except json.JSONDecodeError as e:
+		print(f'ERROR: EXTRA_ACCOUNTS JSON 解析失败: {e}')
+		return None
+
+	if not isinstance(accounts_data, list):
+		print('ERROR: EXTRA_ACCOUNTS must use array format [{}]')
+		return None
+
+	accounts = []
+	for i, account_dict in enumerate(accounts_data):
+		if not isinstance(account_dict, dict):
+			print(f'ERROR: Extra account {i + 1} configuration format is incorrect')
+			return None
+		if not account_dict.get('provider'):
+			print(f'ERROR: Extra account {i + 1} missing provider')
+			return None
+		if not (account_dict.get('access_token') or account_dict.get('cookies') or ((account_dict.get('username') or account_dict.get('email')) and account_dict.get('password'))):
+			print(f'ERROR: Extra account {i + 1} missing authentication fields')
+			return None
+		if account_dict.get('access_token') and not account_dict.get('api_user'):
+			print(f'ERROR: Extra account {i + 1} missing api_user for access_token authentication')
+			return None
+		accounts.append(AccountConfig.from_dict(account_dict, i))
+
+	return accounts
+
+
 def load_accounts_config() -> list[AccountConfig] | None:
 	"""从环境变量加载账号配置"""
 	accounts_str = os.getenv('ANYROUTER_ACCOUNTS')
@@ -284,6 +319,9 @@ def load_accounts_config() -> list[AccountConfig] | None:
 		return None
 	agentrouter_login_accounts = _load_agentrouter_login_accounts_from_env()
 	if agentrouter_login_accounts is None:
+		return None
+	extra_accounts = _load_extra_accounts_from_env()
+	if extra_accounts is None:
 		return None
 
 	agentrouter_account = None
@@ -319,6 +357,7 @@ def load_accounts_config() -> list[AccountConfig] | None:
 	if not accounts_str:
 		standalone_accounts = list(agentrouter_login_accounts)
 		standalone_accounts.extend(agentrouter_accounts)
+		standalone_accounts.extend(extra_accounts)
 		if agentrouter_account:
 			standalone_accounts.insert(0, agentrouter_account)
 		if standalone_accounts:
@@ -374,6 +413,7 @@ def load_accounts_config() -> list[AccountConfig] | None:
 			accounts.append(agentrouter_account)
 		accounts.extend(agentrouter_login_accounts)
 		accounts.extend(agentrouter_accounts)
+		accounts.extend(extra_accounts)
 
 		return accounts
 	except Exception as e:
